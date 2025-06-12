@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import helper_functions as hf
+from helper_functions import clean_review, remove_stop_words, normalize_review, visualize_bigram, visualize_trigram, create_wordcloud_with_mask, get_most_frequent_words, get_bigram_list, get_trigram_list, generate_insights
 
 # add title
 st.set_page_config(page_title="Unveiling hidden insights from raw text data",
@@ -59,9 +59,9 @@ if uploaded_file is not None:
                 df['text'] = df['text'].drop_duplicates()
 
                 # text cleaning
-                df['text-clean'] = df['text'].apply(hf.clean_review)
-                df['text-clean'] = df['text-clean'].apply(hf.remove_stop_words)
-                df['text-clean'] = df['text-clean'].apply(hf.normalize_review)
+                df['text-clean'] = df['text'].apply(clean_review)
+                df['text-clean'] = df['text-clean'].apply(remove_stop_words)
+                df['text-clean'] = df['text-clean'].apply(normalize_review)
 
                 # show the clean text
                 st.write("Preview of the cleaned text:")
@@ -69,18 +69,35 @@ if uploaded_file is not None:
 
                 # display the bigram
                 st.success("Generating bigram barplot...")
-                fig_bigram = hf.create_bigram_barplot(df, 'text-clean')
-                st.pyplot(fig_bigram)
+                fig_bigram = visualize_bigram(df, 'text-clean')
+                st.plotly_chart(fig_bigram)
 
                 # display the trigram
                 st.success("Generating trigram barplot...")
-                fig_trigram = hf.create_trigram_barplot(df, 'text-clean')
-                st.pyplot(fig_trigram)
+                fig_trigram = visualize_trigram(df, 'text-clean')
+                st.plotly_chart(fig_trigram)
 
                 # display the wordcloud
                 st.success("Generating wordcloud...")
-                fig_wordcloud = hf.create_wordcloud(df, 'text-clean')
+                fig_wordcloud = create_wordcloud_with_mask(df, 'text-clean')
                 st.pyplot(fig_wordcloud)
+
+                # give option: want to generate insight or not
+                option = st.selectbox(
+                    "Do you want to get insight generated in Indonesian Language?",
+                    ("Yes", "No")
+                    )
+                
+                if option == "Yes":
+                    st.success("Generating insights...")
+                    # generate insight
+                    most_frequent_words = get_most_frequent_words(df, 'text-clean')
+                    bigrams = get_bigram_list(df, 'text-clean')
+                    trigrams = get_trigram_list(df, 'text-clean')
+                    st.write(generated_insights := generate_insights(most_frequent_words, bigrams, trigrams))
+                    
+                else:
+                    st.info("No insights will be generated. You can still explore the visualizations above.")
 
     except Exception as e:
         st.error(f"Error reading file: {e}")

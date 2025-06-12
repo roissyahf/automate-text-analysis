@@ -2,11 +2,12 @@
 import pandas as pd
 import plotly.express as px
 import matplotlib.pyplot as plt
+import numpy as np
+import cv2
 from collections import Counter
 from wordcloud import WordCloud
 import re
 import emoji
-import html
 import nltk
 nltk.download('stopwords')
 nltk.download('punkt')
@@ -14,9 +15,15 @@ nltk.download('punkt_tab')
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 
-################################
-#### preprocessing the text ####
-################################
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+###############################################################################
+#### Clean the text from tag, punctuation, emoji, hashtag, redundant space ####
+###############################################################################
 
 character = ['.',',',';',':','-,','...','?','!','(',')','[',']','{','}','<','>','"','/','\'','#','-','@',
              'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',
@@ -67,6 +74,10 @@ def clean_review(text):
     text = re.sub('[ ]+',' ',text)
     return text
 
+##################################################
+#### Clean the text from Indonesian stopwords ####
+##################################################
+
 # default stopwords
 default_stopwords = list(stopwords.words('indonesian'))
 
@@ -99,6 +110,10 @@ def remove_stop_words(text):
     text = ' '.join(tokens_without_stopword)
     return text
 
+###############################################
+#### Replace slang words to formal words ####
+###############################################
+
 # handling slang words
 kamus_alay = pd.read_csv('kamus_alay.csv')
 
@@ -116,14 +131,11 @@ def normalize_review(text):
     text = " ".join(list_text)
     return text
 
+#############################
+#### Bigram plot creation ####
+#############################
 
-################################
-#### analyzing the text by drawing charts ####
-################################
-
-
-# function to draw bigrams
-def create_bigram_barplot(df, text_column):
+def visualize_bigram(df, text_column):
     """
     Generate and save a bigram horizontal barplot from a specified column in a DataFrame.
 
@@ -144,73 +156,233 @@ def create_bigram_barplot(df, text_column):
     # Creating DataFrame for top 15 bigrams
     bigrams_freq_df = pd.DataFrame(bigram_freq.most_common(15), columns=['Bigram', 'Frequency'])
 
-    # Creating bar plot
-    fig, ax = plt.subplots(figsize=(12, 8))
-    ax.barh(bigrams_freq_df['Bigram'], bigrams_freq_df['Frequency'], color="#1798E2")
-    ax.set_title(f'Top 15 Bigrams pada Text', fontsize=18)
-    ax.set_xlabel('Frequency', fontsize=16)
-    ax.set_ylabel('Bigram', fontsize=16)
-    ax.tick_params(axis='x', labelsize=14)
-    ax.tick_params(axis='y', labelsize=14)
-    fig.tight_layout()
+    fig = px.bar(bigrams_freq_df, x='Frequency', y='Bigram', orientation='h',
+                 title='Top 15 Bigrams pada Text', color='Frequency',
+                 color_continuous_scale=px.colors.sequential.Blues)
+
     return fig
 
-# function to draw trigrams
-def create_trigram_barplot(df, text_column):
-  """
-    Generate and save a trigram horizontal barplot from a specified column in a DataFrame.
+##############################
+#### Trigram plot creation ####
+##############################
+
+def visualize_trigram(df, text_column):
+    """
+    Generate and save a trigram horizontal barplot from a specified DataFrame.
 
     Parameters:
     df (pd.DataFrame): The DataFrame containing the text data.
-    text_column (str): The name of the column to generate the bigram from.
-  """
+    text_column (str): The name of the column to generate the trigram from.
+    """
 
-  # Tokenization
-  df['tokens'] = df[text_column].apply(lambda x: x.split())
+    # Tokenization
+    df['tokens'] = df[text_column].apply(lambda x: x.split())
 
-  # Trigram (change)
-  df['trigrams'] = df['tokens'].apply(lambda x: [x[i] + " " + x[i+1] + " " + x[i+2] for i in range(len(x)-2)])
+    # Create Trigrams
+    df['trigrams'] = df['tokens'].apply(lambda x: [x[i] + " " + x[i+1] + " " + x[i+2] for i in range(len(x)-2)])
 
-  # Counting trigram frequency
-  trigram_freq = Counter([item for sublist in df['trigrams'] for item in sublist])
+    # Counting trigram frequency
+    trigram_freq = Counter([item for sublist in df['trigrams'] for item in sublist])
 
-  # Creating DataFrame for top bigrams
-  trigrams_freq_df = pd.DataFrame(trigram_freq.most_common(15), columns=['Trigram', 'Frequency'])
+    # Creating DataFrame for top 15 trigrams
+    trigrams_freq_df = pd.DataFrame(trigram_freq.most_common(15), columns=['Trigram', 'Frequency'])
 
-  # Creating barplot
-  fig, ax = plt.subplots(figsize=(12, 8))
-  ax.barh(trigrams_freq_df['Trigram'], trigrams_freq_df['Frequency'], color="#F0E546")
-  ax.set_title(f'Top 15 Trigrams pada Text', fontsize=18)
-  ax.set_xlabel('Frequency', fontsize=16)
-  ax.set_ylabel('Trigram', fontsize=16)
-  ax.tick_params(axis='x', labelsize=14)
-  ax.tick_params(axis='y', labelsize=14)
-  fig.tight_layout()  
-  return fig
+    fig = px.bar(trigrams_freq_df, x='Frequency', y='Trigram', orientation='h',
+                 title='Top 15 Trigrams pada Text', color='Frequency',
+                 color_continuous_scale=px.colors.sequential.Greens)
 
-# function to draw word clouds
-def create_wordcloud(df, text_column):
+    return fig
+
+###################################################
+#### Unigram / Most frequent words plot creation ####
+###################################################
+
+def read_and_convert_image(image_path):
+    """
+    Read an image, convert it to black and white if it's in RGB color, and convert it to a numpy array.
+
+    Parameters:
+    image_path (str): The path to the image file.
+
+    Returns:
+    np.ndarray: The processed image as a numpy array.
+    """
+
+    # Read the image
+    image = cv2.imread(image_path)
+
+    # Check if the image is in RGB color
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        # Convert the image to black and white
+        image_bw = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        # If the image is already in grayscale, use it as is
+        image_bw = image
+
+    # Convert the image to a numpy array
+    image_array = np.array(image_bw)
+
+    return image_array
+
+
+def create_wordcloud_with_mask(df, text_column):
     """
     Generate and save a word cloud from a specified column in a DataFrame.
 
     Parameters:
     df (pd.DataFrame): The DataFrame containing the text data.
     text_column (str): The name of the column to generate the word cloud from.
-
-    Returns:
-    figure
     """
-    # choose dataset column
+    # Choose dataset column
     text_data = df[text_column]
 
-    # generate word cloud
+    # mask used
+    my_array = read_and_convert_image('mask-card-diamond.png')
+
+    # Generate word cloud
     all_text = ' '.join(text_data.tolist())
     word_cloud = WordCloud(max_words=100, background_color='white',
-                           random_state=100, colormap='cool').generate(all_text)
-    fig = plt.figure(figsize=(32, 16))
-    ax = fig.add_subplot(1, 1, 1)
-    plt.imshow(word_cloud, interpolation='bilinear')
-    plt.title(f'WordCloud of Frequently Used Words', fontsize=20)
-    plt.axis("off")
+                           random_state=100, mask=my_array,
+                           contour_width=2, contour_color='white', colormap='cool'
+                           ).generate(all_text)
 
+    # Plot word cloud
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.imshow(word_cloud, interpolation='bilinear')
+    ax.set_title(f'WordCloud of Frequently pada Text', fontsize=10)
+    ax.axis("off")
+    
     return fig
+
+################################################################
+#### Get top most frequent words, bigrams, trigrams in list ####
+################################################################
+
+# function to get most frequent words in list
+def get_most_frequent_words(df, text_column, top_n=15):
+    """
+    Get the most frequent words from a specified column in a DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame containing the text data.
+    text_column (str): The name of the column to analyze.
+    top_n (int): The number of top frequent words to return.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the most frequent words and their counts.
+    """
+    # Tokenization
+    df['tokens'] = df[text_column].apply(lambda x: x.split())
+
+    # Flatten the list of tokens and count frequency
+    all_words = [word for sublist in df['tokens'] for word in sublist]
+    word_freq = Counter(all_words)
+
+    # Creating DataFrame for top N words
+    most_frequent_words_df = pd.DataFrame(word_freq.most_common(top_n), columns=['Word', 'Frequency'])
+    most_frequent_words_df = most_frequent_words_df.sort_values(by='Frequency', ascending=False)
+
+    # Save the top N words into an ordered list (from most to least frequent)
+    most_frequent_words_list = most_frequent_words_df['Word'].tolist()
+    
+    return most_frequent_words_list
+
+# function to get top bigram in list
+def get_bigram_list(df, text_column):
+    """
+    Generate and save a bigram from a specified column in a DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame containing the text data.
+    text_column (str): The name of the column to generate the bigram from.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the top 15 bigrams and their frequencies.
+    """
+    # Tokenization
+    df['tokens'] = df[text_column].apply(lambda x: x.split())
+
+    # Create Bigrams
+    df['bigrams'] = df['tokens'].apply(lambda x: [x[i] + " " + x[i+1] for i in range(len(x)-1)])
+
+    # Counting bigram frequency
+    bigram_freq = Counter([item for sublist in df['bigrams'] for item in sublist])
+
+    # Creating DataFrame for top 15 bigrams
+    bigrams_freq_df = pd.DataFrame(bigram_freq.most_common(15), columns=['Bigram', 'Frequency'])
+    bigrams_freq_df = bigrams_freq_df.sort_values(by='Frequency', ascending=False)
+
+    # Save the top 15 bigrams into an ordered list (from most to least frequent)
+    bigrams_list = bigrams_freq_df['Bigram'].tolist()
+
+    return bigrams_list
+
+# function to get top trigram in list
+def get_trigram_list(df, text_column):
+    """
+    Generate and save a trigram from a specified column in a DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame containing the text data.
+    text_column (str): The name of the column to generate the trigram from.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the top 15 trigrams and their frequencies.
+    """
+    # Tokenization
+    df['tokens'] = df[text_column].apply(lambda x: x.split())
+
+    # Create Trigrams
+    df['trigrams'] = df['tokens'].apply(lambda x: [x[i] + " " + x[i+1] + " " + x[i+2] for i in range(len(x)-2)])
+
+    # Counting trigram frequency
+    trigram_freq = Counter([item for sublist in df['trigrams'] for item in sublist])
+
+    # Creating DataFrame for top 15 trigrams
+    trigrams_freq_df = pd.DataFrame(trigram_freq.most_common(15), columns=['Trigram', 'Frequency'])
+    trigrams_freq_df = trigrams_freq_df.sort_values(by='Frequency', ascending=False)
+
+    # Save the top 15 trigrams into an ordered list (from most to least frequent)
+    trigrams_list = trigrams_freq_df['Trigram'].tolist()
+    
+    return trigrams_list
+
+
+################################################################
+#### Prompt Engineering to get insights ####
+################################################################
+
+# Set up the OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Setting up the recommended model
+model = "gpt-4o-mini"
+
+def generate_insights(most_frequent_words, bigrams, trigrams):
+    """
+    Generate insights based on the provided linguistic features.
+
+    Parameters:
+    most_frequent_words (list): List of most frequent words from the text.
+    bigrams (list): List of bigrams from the text.
+    trigrams (list): List of trigrams from the text.
+
+    Returns:
+    str: Generated insights in Indonesian language.
+    """
+    
+    prompt = f"""
+    Analisis teks berikut dalam Bahasa Indonesia:
+    Kata-kata yang paling sering muncul: {', '.join(most_frequent_words)}
+    Bigrams: {', '.join(bigrams)}
+    Trigrams: {', '.join(trigrams)}
+    Berikan wawasan mendalam dalam format bullet points tentang tema, sentimen, emosi, dan pola yang muncul dari teks ini.
+    """
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=700
+    )
+    
+    return response.choices[0].message.content.strip()
