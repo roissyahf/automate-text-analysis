@@ -1,8 +1,8 @@
 # import library
 import pandas as pd
-import plotly.express as px
 import matplotlib.pyplot as plt
 import numpy as np
+
 import cv2
 from collections import Counter
 from wordcloud import WordCloud
@@ -18,6 +18,13 @@ from nltk.tokenize import word_tokenize
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
+
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.units import inch
+from datetime import datetime
 
 load_dotenv()
 
@@ -156,9 +163,14 @@ def visualize_bigram(df, text_column):
     # Creating DataFrame for top 15 bigrams
     bigrams_freq_df = pd.DataFrame(bigram_freq.most_common(15), columns=['Bigram', 'Frequency'])
 
-    fig = px.bar(bigrams_freq_df, x='Frequency', y='Bigram', orientation='h',
-                 title='Top 15 Bigrams pada Text', color='Frequency',
-                 color_continuous_scale=px.colors.sequential.Blues)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.barh(bigrams_freq_df['Bigram'], bigrams_freq_df['Frequency'], color="#1399BB")
+    ax.set_title(f'Top 15 Bigrams in Text', fontsize=18)
+    ax.set_xlabel('Frequency', fontsize=16)
+    ax.set_ylabel('Bigram', fontsize=16)
+    ax.tick_params(axis='x', labelsize=14)
+    ax.tick_params(axis='y', labelsize=14)
+    fig.tight_layout()
 
     return fig
 
@@ -187,9 +199,14 @@ def visualize_trigram(df, text_column):
     # Creating DataFrame for top 15 trigrams
     trigrams_freq_df = pd.DataFrame(trigram_freq.most_common(15), columns=['Trigram', 'Frequency'])
 
-    fig = px.bar(trigrams_freq_df, x='Frequency', y='Trigram', orientation='h',
-                 title='Top 15 Trigrams pada Text', color='Frequency',
-                 color_continuous_scale=px.colors.sequential.Greens)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.barh(trigrams_freq_df['Trigram'], trigrams_freq_df['Frequency'], color="#A5F043")
+    ax.set_title(f'Top 15 Trigrams in Text', fontsize=18)
+    ax.set_xlabel('Frequency', fontsize=16)
+    ax.set_ylabel('Trigram', fontsize=16)
+    ax.tick_params(axis='x', labelsize=14)
+    ax.tick_params(axis='y', labelsize=14)
+    fig.tight_layout()
 
     return fig
 
@@ -243,13 +260,13 @@ def create_wordcloud_with_mask(df, text_column):
     all_text = ' '.join(text_data.tolist())
     word_cloud = WordCloud(max_words=100, background_color='white',
                            random_state=100, mask=my_array,
-                           contour_width=2, contour_color='white', colormap='cool'
+                           contour_width=2, contour_color='white', colormap='hsv'
                            ).generate(all_text)
 
     # Plot word cloud
     fig, ax = plt.subplots(figsize=(12, 8))
     ax.imshow(word_cloud, interpolation='bilinear')
-    ax.set_title(f'WordCloud of Frequently pada Text', fontsize=10)
+    ax.set_title(f'WordCloud of Frequently Used Words in Text', fontsize=10)
     ax.axis("off")
     
     return fig
@@ -348,9 +365,9 @@ def get_trigram_list(df, text_column):
     return trigrams_list
 
 
-################################################################
+############################################
 #### Prompt Engineering to get insights ####
-################################################################
+############################################
 
 # Set up the OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -386,3 +403,112 @@ def generate_insights(most_frequent_words, bigrams, trigrams):
     )
     
     return response.choices[0].message.content.strip()
+
+
+############################################
+#### Report generation ####
+############################################
+
+# Convert Matplotlib figure to BytesIO object for saving as image
+def matplotlib_fig_to_bytesio(fig):
+    img_bytes = io.BytesIO()
+    fig.savefig(img_bytes, format='png', bbox_inches='tight')
+    img_bytes.seek(0)
+    return img_bytes
+
+# Generate a PDF report with the bigram, trigram, word cloud images, and AI-generated insights
+def draw_wrapped_text(c, text, x, y, max_width, line_height=14, font_name="Helvetica", font_size=10):
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    c.setFont(font_name, font_size)
+    words = text.split()
+    line = ""
+    for word in words:
+        test_line = line + word + " "
+        if stringWidth(test_line, font_name, font_size) <= max_width:
+            line = test_line
+        else:
+            c.drawString(x, y, line.strip())
+            y -= line_height
+            line = word + " "
+    if line:
+        c.drawString(x, y, line.strip())
+        y -= line_height
+    return y
+
+def create_pdf_report(bigram_img, trigram_img, wordcloud_img, insights_text, filename):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    margin = 50
+    max_text_width = width - 2 * margin
+    y = height - margin
+    page_num = 1
+
+    def footer():
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(width / 2.0, 25, f"Page {page_num}")
+
+    def next_page():
+        nonlocal y, page_num
+        footer()
+        c.showPage()
+        page_num += 1
+        y = height - margin
+
+    def check_page_break(required_space):
+        if y < margin + required_space:
+            next_page()
+
+    # --- Title & Metadata ---
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin, y, "Text Analysis Report")
+    y -= 20
+
+    c.setFont("Helvetica", 10)
+    c.drawString(margin, y, f"Filename: {filename}")
+    y -= 15
+    c.drawString(margin, y, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    y -= 30
+
+    # --- Bigrams ---
+    check_page_break(220)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(margin, y, "Top Bigrams")
+    y -= 10
+    c.drawImage(ImageReader(bigram_img), margin, y - 200, width=5.5*inch, height=2.5*inch)
+    y -= 220
+
+    # --- Trigrams ---
+    check_page_break(220)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(margin, y, "Top Trigrams")
+    y -= 10
+    c.drawImage(ImageReader(trigram_img), margin, y - 200, width=5.5*inch, height=2.5*inch)
+    y -= 220
+
+    # --- Word Cloud ---
+    check_page_break(220)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(margin, y, "Word Cloud")
+    y -= 10
+    c.drawImage(ImageReader(wordcloud_img), margin, y - 200, width=6*inch, height=3.5*inch)
+    y -= 220
+
+    # --- Insights (Markdown as raw text with wrapping) ---
+    check_page_break(100)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(margin, y, "AI-Generated Insights")
+    y -= 20
+
+    for line in insights_text.strip().split('\n'):
+        if line.strip():
+            check_page_break(30)
+            y = draw_wrapped_text(c, "• " + line.strip(), margin, y, max_text_width)
+
+    # Final footer on last page
+    footer()
+    c.save()
+    buffer.seek(0)
+    return buffer

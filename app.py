@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
-from helper_functions import clean_review, remove_stop_words, normalize_review, visualize_bigram, visualize_trigram, create_wordcloud_with_mask, get_most_frequent_words, get_bigram_list, get_trigram_list, generate_insights
+from helper_functions import clean_review, remove_stop_words, normalize_review
+from helper_functions import visualize_bigram, visualize_trigram, create_wordcloud_with_mask
+from helper_functions import get_most_frequent_words, get_bigram_list, get_trigram_list, generate_insights
+from helper_functions import matplotlib_fig_to_bytesio, create_pdf_report
 
 # add title
 st.set_page_config(page_title="Unveiling hidden insights from raw text data",
@@ -9,7 +12,7 @@ st.title('Analyze your text easily')
 st.write('Understanding what your raw text data is trying to tell you can be a daunting task. '
          'This app is designed to help you uncover hidden insights from your text data effortlessly. '
          'Simply upload your CSV or Excel file, and let the app do the rest!')
-st.info('This app works really well for Indonesian text, as the preprocessing method was designed for Indonesian text. '
+st.info('This app works really well for Indonesian text, as the preprocessing method and prompting strategy was designed for Indonesian text. '
          'However, it can also be used for other languages with some limitations.')
 
 # adjust the layout of the app
@@ -70,12 +73,12 @@ if uploaded_file is not None:
                 # display the bigram
                 st.success("Generating bigram barplot...")
                 fig_bigram = visualize_bigram(df, 'text-clean')
-                st.plotly_chart(fig_bigram)
+                st.pyplot(fig_bigram)
 
                 # display the trigram
                 st.success("Generating trigram barplot...")
                 fig_trigram = visualize_trigram(df, 'text-clean')
-                st.plotly_chart(fig_trigram)
+                st.pyplot(fig_trigram)
 
                 # display the wordcloud
                 st.success("Generating wordcloud...")
@@ -85,7 +88,7 @@ if uploaded_file is not None:
                 # give option: want to generate insight or not
                 option = st.selectbox(
                     "Do you want to get insight generated in Indonesian Language?",
-                    ("Yes", "No")
+                    ("No", "Yes")
                     )
                 
                 if option == "Yes":
@@ -95,6 +98,27 @@ if uploaded_file is not None:
                     bigrams = get_bigram_list(df, 'text-clean')
                     trigrams = get_trigram_list(df, 'text-clean')
                     st.write(generated_insights := generate_insights(most_frequent_words, bigrams, trigrams))
+
+                    # saving plot into buffer
+                    bigram_buf = matplotlib_fig_to_bytesio(fig_bigram)
+                    trigram_buf = matplotlib_fig_to_bytesio(fig_trigram)
+                    wordcloud_buf = matplotlib_fig_to_bytesio(fig_wordcloud)
+
+                    report_pdf = create_pdf_report(
+                        bigram_img=bigram_buf,
+                        trigram_img=trigram_buf,
+                        wordcloud_img=wordcloud_buf,
+                        insights_text=generated_insights,
+                        filename=uploaded_file.name
+                        )
+
+                    # button to download report
+                    st.download_button(
+                        label="📄 Download PDF Report",
+                        data=report_pdf,
+                        file_name="text_analysis_report.pdf",
+                        mime="application/pdf"
+                        )
                     
                 else:
                     st.info("No insights will be generated. You can still explore the visualizations above.")
