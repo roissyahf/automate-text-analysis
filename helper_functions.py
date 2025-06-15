@@ -15,9 +15,8 @@ nltk.download('punkt_tab')
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 
-import os
 from openai import OpenAI
-from dotenv import load_dotenv
+import streamlit as st
 
 import io
 from reportlab.lib.pagesizes import A4
@@ -25,8 +24,6 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.units import inch
 from datetime import datetime
-
-load_dotenv()
 
 ###############################################################################
 #### Clean the text from tag, punctuation, emoji, hashtag, redundant space ####
@@ -370,7 +367,7 @@ def get_trigram_list(df, text_column):
 ############################################
 
 # Set up the OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=st.secrets["api"]["OPENAI_API_KEY"])
 
 # Setting up the recommended model
 model = "gpt-4o-mini"
