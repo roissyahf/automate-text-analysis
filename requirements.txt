@@ -4,8 +4,7 @@ matplotlib
 nltk
 numpy
 openai
-opencv_python
 pandas
-python-dotenv
 reportlab
 wordcloud
+opencv-python
