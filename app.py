@@ -1,10 +1,7 @@
 import streamlit as st
 import pandas as pd
 import helper_functions as hf
-#from helper_functions import clean_review, remove_stop_words, normalize_review
-#from helper_functions import visualize_bigram, visualize_trigram, create_wordcloud_with_mask
-#from helper_functions import get_most_frequent_words, get_bigram_list, get_trigram_list, generate_insights
-#from helper_functions import matplotlib_fig_to_bytesio, create_pdf_report
+from markdown import markdown
 
 # add title
 st.set_page_config(page_title="Unveiling hidden insights from raw text data",
@@ -109,7 +106,7 @@ if uploaded_file is not None:
                         bigram_img=bigram_buf,
                         trigram_img=trigram_buf,
                         wordcloud_img=wordcloud_buf,
-                        insights_text=generated_insights,
+                        insights_html=markdown(generated_insights),
                         filename=uploaded_file.name
                         )
 

@@ -8,3 +8,6 @@ pandas
 reportlab
 wordcloud
 opencv-python-headless
+beautifulsoup4
+PyPDF2
+markdown

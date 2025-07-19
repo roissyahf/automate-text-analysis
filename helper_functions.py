@@ -20,10 +20,17 @@ import streamlit as st
 
 import io
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.units import inch
 from datetime import datetime
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Frame, Spacer, PageTemplate
+from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import A4
+from bs4 import BeautifulSoup
+from PyPDF2 import PdfMerger
 
 ###############################################################################
 #### Clean the text from tag, punctuation, emoji, hashtag, redundant space ####
@@ -60,7 +67,7 @@ def clean_review(text):
     # delete link
     text = re.sub(r"(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})", "", text)
     # delete username
-    text = re.sub(r"@[^\s]+[\s]?", ' ', text) #@[\w\.]+ #@([a-zA-Z0-9._]{1,30})
+    text = re.sub(r"@[^\s]+[\s]?", ' ', text) 
     # delete hashtag
     text = re.sub(r'#(\S+)', r'\1', text)
     # remove html
@@ -119,7 +126,7 @@ def remove_stop_words(text):
 ###############################################
 
 # handling slang words
-kamus_alay = pd.read_csv('kamus_alay.csv')
+kamus_alay = pd.read_csv('asset/idn_slang_words.csv')
 
 normalize_word_dict = {}
 for index, row in kamus_alay.iterrows():
@@ -251,7 +258,7 @@ def create_wordcloud_with_mask(df, text_column):
     text_data = df[text_column]
 
     # mask used
-    my_array = read_and_convert_image('mask-card-diamond.png')
+    my_array = read_and_convert_image('asset/mask-card-diamond.png')
 
     # Generate word cloud
     all_text = ' '.join(text_data.tolist())
@@ -414,49 +421,61 @@ def matplotlib_fig_to_bytesio(fig):
     return img_bytes
 
 # Generate a PDF report with the bigram, trigram, word cloud images, and AI-generated insights
-def draw_wrapped_text(c, text, x, y, max_width, line_height=14, font_name="Helvetica", font_size=10):
-    from reportlab.pdfbase.pdfmetrics import stringWidth
+# Convert HTML into flowables, to keep the text format
+def convert_html_to_flowables(html_text):
+    styles = getSampleStyleSheet()
+    body_style = styles['BodyText']
+    soup = BeautifulSoup(html_text, 'html.parser')
+    flowables = []
 
-    c.setFont(font_name, font_size)
-    words = text.split()
-    line = ""
-    for word in words:
-        test_line = line + word + " "
-        if stringWidth(test_line, font_name, font_size) <= max_width:
-            line = test_line
-        else:
-            c.drawString(x, y, line.strip())
-            y -= line_height
-            line = word + " "
-    if line:
-        c.drawString(x, y, line.strip())
-        y -= line_height
-    return y
+    for tag in soup.contents:
+        if tag.name == 'p':
+            flowables.append(Paragraph(tag.get_text(), body_style))
+            flowables.append(Spacer(1, 6))
 
-def create_pdf_report(bigram_img, trigram_img, wordcloud_img, insights_text, filename):
+        elif tag.name in ['h1', 'h2', 'h3']:
+            heading_style = styles['Heading3'] if tag.name == 'h3' else styles['Heading2']
+            flowables.append(Paragraph(tag.get_text(), heading_style))
+            flowables.append(Spacer(1, 8))
+
+        elif tag.name == 'ul':
+            for li in tag.find_all('li'):
+                flowables.append(Paragraph(
+                    '• ' + li.get_text(), body_style))
+                flowables.append(Spacer(1, 4))
+
+        elif tag.name == 'br':
+            flowables.append(Spacer(1, 6))
+    return flowables
+
+# Generate a PDF report with the bigram, trigram, word cloud images, and AI-generated insights
+def generate_insights_pdf(insights_html):
     buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            leftMargin=50, rightMargin=50,
+                            topMargin=60, bottomMargin=50)
+    width, height = A4
+
+    frame = Frame(50, 50, width - 100, height - 100, id='normal')
+    template = PageTemplate(id='report', frames=frame)
+    doc.addPageTemplates([template])
+
+    flowables = []
+    flowables.append(Paragraph("AI-Generated Insights", getSampleStyleSheet()['Heading2']))
+    flowables.append(Spacer(1, 12))
+    flowables.extend(convert_html_to_flowables(insights_html))
+
+    doc.build(flowables)
+    buffer.seek(0)
+    return buffer
+
+def create_main_report(bigram_img, trigram_img, wordcloud_img, filename):
+    buffer = io.BytesIO()
+    c = Canvas(buffer, pagesize=A4)
     width, height = A4
 
     margin = 50
-    max_text_width = width - 2 * margin
     y = height - margin
-    page_num = 1
-
-    def footer():
-        c.setFont("Helvetica", 9)
-        c.drawCentredString(width / 2.0, 25, f"Page {page_num}")
-
-    def next_page():
-        nonlocal y, page_num
-        footer()
-        c.showPage()
-        page_num += 1
-        y = height - margin
-
-    def check_page_break(required_space):
-        if y < margin + required_space:
-            next_page()
 
     # --- Title & Metadata ---
     c.setFont("Helvetica-Bold", 16)
@@ -470,42 +489,43 @@ def create_pdf_report(bigram_img, trigram_img, wordcloud_img, insights_text, fil
     y -= 30
 
     # --- Bigrams ---
-    check_page_break(220)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(margin, y, "Top Bigrams")
-    y -= 10
-    c.drawImage(ImageReader(bigram_img), margin, y - 200, width=5.5*inch, height=2.5*inch)
-    y -= 220
+    y -= 15
+    c.drawImage(ImageReader(bigram_img), margin, y - 2*inch, width=5.5*inch, height=2*inch)
+    y -= 2*inch + 20
 
     # --- Trigrams ---
-    check_page_break(220)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(margin, y, "Top Trigrams")
-    y -= 10
-    c.drawImage(ImageReader(trigram_img), margin, y - 200, width=5.5*inch, height=2.5*inch)
-    y -= 220
+    y -= 15
+    c.drawImage(ImageReader(trigram_img), margin, y - 2*inch, width=5.5*inch, height=2*inch)
+    y -= 2*inch + 20
 
     # --- Word Cloud ---
-    check_page_break(220)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(margin, y, "Word Cloud")
-    y -= 10
-    c.drawImage(ImageReader(wordcloud_img), margin, y - 200, width=6*inch, height=3.5*inch)
-    y -= 220
-
-    # --- Insights (Markdown as raw text with wrapping) ---
-    check_page_break(100)
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(margin, y, "AI-Generated Insights")
-    y -= 20
-
-    for line in insights_text.strip().split('\n'):
-        if line.strip():
-            check_page_break(30)
-            y = draw_wrapped_text(c, "• " + line.strip(), margin, y, max_text_width)
-
-    # Final footer on last page
-    footer()
+    y -= 15
+    c.drawImage(ImageReader(wordcloud_img), margin, y - 3*inch, width=6*inch, height=3*inch)
+    y -= 3*inch + 20
+    
     c.save()
     buffer.seek(0)
     return buffer
+
+def create_pdf_report(bigram_img, trigram_img, wordcloud_img, insights_html, filename):
+    # Create main report (canvas-based)
+    static_report = create_main_report(bigram_img, trigram_img, wordcloud_img, filename)
+
+    # Create dynamic insights (html to flowables)
+    insights_report = generate_insights_pdf(insights_html)
+
+    # Merge both PDFs
+    merged = PdfMerger()
+    merged.append(static_report)
+    merged.append(insights_report)
+
+    final_buffer = io.BytesIO()
+    merged.write(final_buffer)
+    final_buffer.seek(0)
+    return final_buffer
